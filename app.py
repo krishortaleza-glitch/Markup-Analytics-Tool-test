@@ -205,23 +205,10 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         merged["Tax"] = merged["Tax"].fillna(0)
 
         # ==============================
-        # CALCULATIONS (FIRST!)
+        # CALCULATIONS
         # ==============================
         merged["Invoice Cost"] = pd.to_numeric(merged[inv_cost], errors="coerce")
 
-        # ==============================
-        # 🔥 DEDUP FIX (AFTER Invoice Cost)
-        # ==============================
-        merged = merged.sort_values("Tax", ascending=False)
-
-        merged = merged.drop_duplicates(
-            subset=["State", "Family", "Type", "Invoice Cost"],
-            keep="first"
-        )
-
-        # ==============================
-        # CONTINUE CALCS
-        # ==============================
         merged["Total Cost"] = merged["Frontline"] + merged["Tax"]
         merged["Markup"] = merged["Invoice Cost"] - merged["Total Cost"]
         merged["Markup %"] = merged["Markup"] / merged["Total Cost"]
@@ -235,7 +222,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         progress.progress(90)
 
         # ==============================
-        # FREQUENCY
+        # FREQUENCY (BEFORE DEDUP ✅)
         # ==============================
         freq = (
             merged
@@ -250,6 +237,16 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         )
 
         merged = merged.merge(freq, on=["State", "Family", "Type", "Invoice Cost"], how="left")
+
+        # ==============================
+        # 🔥 DEDUP AFTER FREQUENCY
+        # ==============================
+        merged = merged.sort_values("Tax", ascending=False)
+
+        merged = merged.drop_duplicates(
+            subset=["State", "Family", "Type", "Invoice Cost"],
+            keep="first"
+        )
 
         # ==============================
         # FINAL OUTPUT
