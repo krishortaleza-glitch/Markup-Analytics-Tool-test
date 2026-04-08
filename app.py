@@ -83,7 +83,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         progress.progress(10)
 
         # ==============================
-        # 🔥 FORCE PRODUCT UNIQUENESS
+        # PRODUCT DEDUP
         # ==============================
         prod = (
             prod
@@ -205,7 +205,12 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         merged["Tax"] = merged["Tax"].fillna(0)
 
         # ==============================
-        # 🔥 HARD DEDUP (FINAL FIX)
+        # CALCULATIONS (FIRST!)
+        # ==============================
+        merged["Invoice Cost"] = pd.to_numeric(merged[inv_cost], errors="coerce")
+
+        # ==============================
+        # 🔥 DEDUP FIX (AFTER Invoice Cost)
         # ==============================
         merged = merged.sort_values("Tax", ascending=False)
 
@@ -215,10 +220,8 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         )
 
         # ==============================
-        # CALCULATIONS
+        # CONTINUE CALCS
         # ==============================
-        merged["Invoice Cost"] = pd.to_numeric(merged[inv_cost], errors="coerce")
-
         merged["Total Cost"] = merged["Frontline"] + merged["Tax"]
         merged["Markup"] = merged["Invoice Cost"] - merged["Total Cost"]
         merged["Markup %"] = merged["Markup"] / merged["Total Cost"]
@@ -232,7 +235,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         progress.progress(90)
 
         # ==============================
-        # FREQUENCY (FIXED)
+        # FREQUENCY
         # ==============================
         freq = (
             merged
