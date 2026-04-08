@@ -8,9 +8,6 @@ from openpyxl.styles import PatternFill
 st.set_page_config(page_title="Wholesale Markup Analytics", layout="wide")
 st.title("💰 Wholesale Markup Analytics Tool")
 
-# ==============================
-# LOAD FILES
-# ==============================
 @st.cache_data
 def load_file(file):
     if file.name.endswith(".csv"):
@@ -39,7 +36,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
     st.success("Files loaded")
 
     # ==============================
-    # FIXED COLUMN MAPPING
+    # COLUMN MAPPING
     # ==============================
     inv_store = "store"
     inv_product = "productId"
@@ -74,16 +71,25 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         inv["ProductID"] = inv[inv_product].apply(clean_id)
         prod["ProductID"] = prod[prod_id].apply(clean_id)
 
-        prod["Family"] = prod[prod_family].astype(str).str.strip().str.upper()
-        front["Family"] = front[front_family].astype(str).str.strip().str.upper()
-
         inv["Store"] = inv[inv_store].astype(str).str.strip()
         store["Store"] = store[store_store].astype(str).str.strip()
 
         store["State"] = store[store_state].astype(str).str.strip()
         tax["State"] = tax[tax_state].astype(str).str.strip()
 
+        prod["Family"] = prod[prod_family].astype(str).str.strip().str.upper()
+        front["Family"] = front[front_family].astype(str).str.strip().str.upper()
+
         progress.progress(10)
+
+        # ==============================
+        # 🔥 FORCE PRODUCT UNIQUENESS
+        # ==============================
+        prod = (
+            prod
+            .sort_values(prod_case, ascending=False)
+            .drop_duplicates(subset=["ProductID"], keep="first")
+        )
 
         # ==============================
         # MERGE PRODUCT
@@ -113,8 +119,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         active_front = (
             active_front
             .sort_values(front_start, ascending=False)
-            .groupby("Family", as_index=False)
-            .first()
+            .drop_duplicates(subset=["Family"])
         )
 
         progress.progress(45)
@@ -153,7 +158,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         progress.progress(85)
 
         # ==============================
-        # TAX LOGIC WITH RULE TRACKING
+        # TAX RULE ENGINE
         # ==============================
         merged["Base Tax"] = pd.to_numeric(merged[tax_value], errors="coerce")
         merged["Frontline"] = pd.to_numeric(merged[front_cost], errors="coerce")
@@ -165,7 +170,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         merged["Type"] = merged["Type"].astype(str).str.strip()
         merged["State"] = merged["State"].astype(str).str.strip().str.upper()
 
-        # Rule 1: TX
+        # TX
         mask_tx = (
             merged["Type"].isin(["Modern Oral", "Smokeless", "Smokeless Big", "Snus"]) &
             (merged["State"] == "TX")
@@ -173,7 +178,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         merged.loc[mask_tx, "Tax"] = merged[prod_case] * merged["Base Tax"]
         merged.loc[mask_tx, "Tax Rule Applied"] = "TX: Case * Tax"
 
-        # Rule 2: CO Smokeless Big
+        # CO Smokeless Big
         mask_co_big = (
             (merged["Type"] == "Smokeless Big") &
             (merged["State"] == "CO")
@@ -181,7 +186,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         merged.loc[mask_co_big, "Tax"] = merged[prod_case] * merged["Base Tax"]
         merged.loc[mask_co_big, "Tax Rule Applied"] = "CO Big: Case * Tax"
 
-        # Rule 3: KS, NM
+        # KS, NM
         mask_ks_nm = (
             merged["Type"].isin(["Modern Oral", "Smokeless", "Smokeless Big", "Snus"]) &
             merged["State"].isin(["KS", "NM"])
@@ -189,7 +194,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         merged.loc[mask_ks_nm, "Tax"] = (merged["Base Tax"] / 100) * merged["Frontline"]
         merged.loc[mask_ks_nm, "Tax Rule Applied"] = "KS/NM: % * Frontline"
 
-        # Rule 4: CO percentage
+        # CO %
         mask_co_pct = (
             merged["Type"].isin(["Modern Oral", "Smokeless", "Snus"]) &
             (merged["State"] == "CO")
@@ -198,6 +203,16 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         merged.loc[mask_co_pct, "Tax Rule Applied"] = "CO: % * Frontline"
 
         merged["Tax"] = merged["Tax"].fillna(0)
+
+        # ==============================
+        # 🔥 HARD DEDUP (FINAL FIX)
+        # ==============================
+        merged = merged.sort_values("Tax", ascending=False)
+
+        merged = merged.drop_duplicates(
+            subset=["State", "Family", "Type", "Invoice Cost"],
+            keep="first"
+        )
 
         # ==============================
         # CALCULATIONS
@@ -217,21 +232,21 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         progress.progress(90)
 
         # ==============================
-        # FREQUENCY
+        # FREQUENCY (FIXED)
         # ==============================
         freq = (
             merged
-            .groupby(["State", "Family", "Invoice Cost"])
+            .groupby(["State", "Family", "Type", "Invoice Cost"])
             .size()
             .reset_index(name="Frequency")
         )
 
         freq["Top"] = (
-            freq.groupby(["State", "Family"])["Frequency"]
+            freq.groupby(["State", "Family", "Type"])["Frequency"]
             .transform("max") == freq["Frequency"]
         )
 
-        merged = merged.merge(freq, on=["State", "Family", "Invoice Cost"], how="left")
+        merged = merged.merge(freq, on=["State", "Family", "Type", "Invoice Cost"], how="left")
 
         # ==============================
         # FINAL OUTPUT
