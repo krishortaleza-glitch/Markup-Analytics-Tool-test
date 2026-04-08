@@ -2,8 +2,6 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 from datetime import datetime
-from openpyxl import load_workbook
-from openpyxl.styles import PatternFill
 
 st.set_page_config(page_title="Wholesale Markup Analytics", layout="wide")
 st.title("💰 Wholesale Markup Analytics Tool")
@@ -55,7 +53,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
     store_store = "uniqueId"
     store_state = "stateAbbrev"
 
-    # TAX selectors
+    # TAX SELECTORS
     tax_state = st.selectbox("Tax State", tax.columns)
     tax_percentage_col = st.selectbox("Percentage", tax.columns)
     tax_value = st.selectbox("Tax", tax.columns)
@@ -66,11 +64,17 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         progress = st.progress(0)
 
         # ==============================
-        # CLEAN KEYS
+        # CLEAN NUMERIC FUNCTION
         # ==============================
+        def clean_numeric(series):
+            return pd.to_numeric(series.astype(str).str.strip(), errors="coerce")
+
         def clean_id(x):
             return str(x).strip().lstrip("0")
 
+        # ==============================
+        # CLEAN KEYS
+        # ==============================
         inv["ProductID"] = inv[inv_product].apply(clean_id)
         prod["ProductID"] = prod[prod_id].apply(clean_id)
 
@@ -148,25 +152,23 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         # ==============================
         # TAX MERGE
         # ==============================
-        merged = merged.merge(
-            tax,
-            on="State",
-            how="left"
-        )
+        merged = merged.merge(tax, on="State", how="left")
 
         progress.progress(85)
 
         # ==============================
+        # CLEAN NUMERIC FIELDS (FIXED)
+        # ==============================
+        merged["Percentage"] = clean_numeric(merged[tax_percentage_col])
+        merged["TaxValue"] = clean_numeric(merged[tax_value])
+        merged["Products/Case * Tax"] = clean_numeric(merged[uom_tax_col])
+        merged["Frontline"] = clean_numeric(merged[front_cost])
+        merged["Products/Case"] = clean_numeric(merged["Products/Case"])
+
+        # ==============================
         # TAX ENGINE (FINAL LOGIC)
         # ==============================
-        merged["Percentage"] = pd.to_numeric(merged[tax_percentage_col], errors="coerce")
-        merged["TaxValue"] = pd.to_numeric(merged[tax_value], errors="coerce")
-        merged["Products/Case * Tax"] = pd.to_numeric(merged[uom_tax_col], errors="coerce")
-
-        merged["Frontline"] = pd.to_numeric(merged[front_cost], errors="coerce")
-        merged["Products/Case"] = pd.to_numeric(merged["Products/Case"], errors="coerce")
-
-        merged["Tax"] = 0
+        merged["Tax"] = 0.0
         merged["Tax Rule Applied"] = "None"
 
         # 1️⃣ Percentage
@@ -194,7 +196,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         # ==============================
         # CALCULATIONS
         # ==============================
-        merged["Invoice Cost"] = pd.to_numeric(merged[inv_cost], errors="coerce")
+        merged["Invoice Cost"] = clean_numeric(merged[inv_cost])
 
         merged["Total Cost"] = merged["Frontline"] + merged["Tax"]
         merged["Markup"] = merged["Invoice Cost"] - merged["Total Cost"]
