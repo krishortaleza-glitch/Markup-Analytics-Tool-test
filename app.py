@@ -25,15 +25,9 @@ front_file = st.file_uploader("Frontline")
 tax_file = st.file_uploader("Taxes")
 store_file = st.file_uploader("Storelist")
 
-# ==============================
-# FORMULA DISPLAY
-# ==============================
 st.markdown("### 📊 Markup % Formula")
 st.info("Markup % = (Invoice Cost - (Frontline + Tax)) / (Frontline + Tax)")
 
-# ==============================
-# RUN LOGIC
-# ==============================
 if inv_file and prod_file and front_file and tax_file and store_file:
 
     inv = load_file(inv_file)
@@ -47,28 +41,23 @@ if inv_file and prod_file and front_file and tax_file and store_file:
     # ==============================
     # FIXED COLUMN MAPPING
     # ==============================
-
-    # Invoice
     inv_store = "store"
     inv_product = "productId"
     inv_cost = "price"
 
-    # Product
     prod_id = "ProductId"
     prod_family = "Family"
     prod_type = "Type"
+    prod_case = "Products/Case"
 
-    # Frontline
     front_family = "Family"
     front_cost = "CasePrice"
     front_start = "Start"
     front_end = "End"
 
-    # Store
     store_store = "uniqueId"
     store_state = "stateAbbrev"
 
-    # Tax (ONLY selector kept)
     tax_state = st.selectbox("Tax State", tax.columns)
     tax_value = st.selectbox("Tax Value", tax.columns)
 
@@ -77,7 +66,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         progress = st.progress(0)
 
         # ==============================
-        # CLEAN KEYS (IMPORTANT)
+        # CLEAN KEYS
         # ==============================
         def clean_id(x):
             return str(x).strip().lstrip("0")
@@ -97,10 +86,10 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         progress.progress(10)
 
         # ==============================
-        # MERGE PRODUCT (KEY STEP)
+        # MERGE PRODUCT
         # ==============================
         merged = inv.merge(
-            prod[["ProductID", "Family", "Type"]],
+            prod[["ProductID", "Family", "Type", prod_case]],
             on="ProductID",
             how="left"
         )
@@ -153,7 +142,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         progress.progress(75)
 
         # ==============================
-        # TAX
+        # TAX MERGE
         # ==============================
         merged = merged.merge(
             tax[["State", tax_value]],
@@ -164,14 +153,56 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         progress.progress(85)
 
         # ==============================
+        # TAX LOGIC WITH RULE TRACKING
+        # ==============================
+        merged["Base Tax"] = pd.to_numeric(merged[tax_value], errors="coerce")
+        merged["Frontline"] = pd.to_numeric(merged[front_cost], errors="coerce")
+        merged[prod_case] = pd.to_numeric(merged[prod_case], errors="coerce")
+
+        merged["Tax"] = merged["Base Tax"]
+        merged["Tax Rule Applied"] = "Default"
+
+        merged["Type"] = merged["Type"].astype(str).str.strip()
+        merged["State"] = merged["State"].astype(str).str.strip().str.upper()
+
+        # Rule 1: TX
+        mask_tx = (
+            merged["Type"].isin(["Modern Oral", "Smokeless", "Smokeless Big", "Snus"]) &
+            (merged["State"] == "TX")
+        )
+        merged.loc[mask_tx, "Tax"] = merged[prod_case] * merged["Base Tax"]
+        merged.loc[mask_tx, "Tax Rule Applied"] = "TX: Case * Tax"
+
+        # Rule 2: CO Smokeless Big
+        mask_co_big = (
+            (merged["Type"] == "Smokeless Big") &
+            (merged["State"] == "CO")
+        )
+        merged.loc[mask_co_big, "Tax"] = merged[prod_case] * merged["Base Tax"]
+        merged.loc[mask_co_big, "Tax Rule Applied"] = "CO Big: Case * Tax"
+
+        # Rule 3: KS, NM
+        mask_ks_nm = (
+            merged["Type"].isin(["Modern Oral", "Smokeless", "Smokeless Big", "Snus"]) &
+            merged["State"].isin(["KS", "NM"])
+        )
+        merged.loc[mask_ks_nm, "Tax"] = (merged["Base Tax"] / 100) * merged["Frontline"]
+        merged.loc[mask_ks_nm, "Tax Rule Applied"] = "KS/NM: % * Frontline"
+
+        # Rule 4: CO percentage
+        mask_co_pct = (
+            merged["Type"].isin(["Modern Oral", "Smokeless", "Snus"]) &
+            (merged["State"] == "CO")
+        )
+        merged.loc[mask_co_pct, "Tax"] = (merged["Base Tax"] / 100) * merged["Frontline"]
+        merged.loc[mask_co_pct, "Tax Rule Applied"] = "CO: % * Frontline"
+
+        merged["Tax"] = merged["Tax"].fillna(0)
+
+        # ==============================
         # CALCULATIONS
         # ==============================
         merged["Invoice Cost"] = pd.to_numeric(merged[inv_cost], errors="coerce")
-        merged["Frontline"] = pd.to_numeric(merged[front_cost], errors="coerce")
-        merged["Tax"] = pd.to_numeric(merged[tax_value], errors="coerce")
-
-        merged["Frontline"] = merged["Frontline"].fillna(0)
-        merged["Tax"] = merged["Tax"].fillna(0)
 
         merged["Total Cost"] = merged["Frontline"] + merged["Tax"]
         merged["Markup"] = merged["Invoice Cost"] - merged["Total Cost"]
@@ -179,7 +210,6 @@ if inv_file and prod_file and front_file and tax_file and store_file:
 
         merged["Markup %"] = merged["Markup %"].replace([float("inf"), -float("inf")], 0)
 
-        # FORMAT
         merged["Total Cost"] = merged["Total Cost"].round(2)
         merged["Markup"] = merged["Markup"].round(2)
         merged["Markup %"] = merged["Markup %"].round(3)
@@ -204,20 +234,11 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         merged = merged.merge(freq, on=["State", "Family", "Invoice Cost"], how="left")
 
         # ==============================
-        # FINAL OUTPUT (Type = Column C)
+        # FINAL OUTPUT
         # ==============================
         final = merged[[
-            "State",
-            "Family",
-            "Type",  # ✅ from Product via ProductID
-            "Invoice Cost",
-            "Frontline",
-            "Tax",
-            "Total Cost",
-            "Markup",
-            "Markup %",
-            "Frequency",
-            "Top"
+            "State","Family","Type","Invoice Cost","Frontline","Tax",
+            "Total Cost","Markup","Markup %","Frequency","Top","Tax Rule Applied"
         ]].drop_duplicates()
 
         # ==============================
