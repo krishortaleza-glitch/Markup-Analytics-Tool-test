@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 from datetime import datetime
+from openpyxl import load_workbook
+from openpyxl.styles import PatternFill
 
 st.set_page_config(page_title="Wholesale Markup Analytics", layout="wide")
 st.title("💰 Wholesale Markup Analytics Tool")
@@ -110,7 +112,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         progress.progress(25)
 
         # ==============================
-        # NORMALIZE TYPE (CRITICAL)
+        # NORMALIZE TYPE
         # ==============================
         merged["Type"] = clean_text(merged["Type"])
         tax["ProductType"] = clean_text(tax[tax_type_col])
@@ -160,7 +162,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         progress.progress(75)
 
         # ==============================
-        # 🔥 TAX MERGE (STATE + TYPE)
+        # TAX MERGE (STATE + TYPE)
         # ==============================
         merged = merged.merge(
             tax,
@@ -257,7 +259,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         ]]
 
         # ==============================
-        # EXPORT
+        # EXPORT WITH HIGHLIGHT
         # ==============================
         output = BytesIO()
 
@@ -267,8 +269,24 @@ if inv_file and prod_file and front_file and tax_file and store_file:
 
         output.seek(0)
 
+        wb = load_workbook(output)
+        ws = wb["Analysis"]
+
+        green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+
+        top_col_index = list(final.columns).index("Top") + 1
+
+        for row in range(2, ws.max_row + 1):
+            if ws.cell(row=row, column=top_col_index).value:
+                for col in range(1, ws.max_column + 1):
+                    ws.cell(row=row, column=col).fill = green_fill
+
+        final_output = BytesIO()
+        wb.save(final_output)
+        final_output.seek(0)
+
         st.download_button(
             "📥 Download Analysis",
-            data=output,
+            data=final_output,
             file_name=f"markup_analysis_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
         )
