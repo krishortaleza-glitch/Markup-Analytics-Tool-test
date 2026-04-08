@@ -29,12 +29,7 @@ store_file = st.file_uploader("Storelist")
 # FORMULA DISPLAY
 # ==============================
 st.markdown("### 📊 Markup % Formula")
-
-st.info(
-    """
-    **Markup % = (Invoice Cost - (Frontline + Tax)) / (Frontline + Tax)**
-    """
-)
+st.info("Markup % = (Invoice Cost - (Frontline + Tax)) / (Frontline + Tax)")
 
 # ==============================
 # RUN LOGIC
@@ -56,11 +51,12 @@ if inv_file and prod_file and front_file and tax_file and store_file:
     # Invoice
     inv_store = "store"
     inv_product = "productId"
-    inv_cost = "price"   # change to "total" if needed
+    inv_cost = "price"
 
     # Product
     prod_id = "ProductId"
     prod_family = "Family"
+    prod_type = "Type"
 
     # Frontline
     front_family = "Family"
@@ -81,10 +77,13 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         progress = st.progress(0)
 
         # ==============================
-        # CLEAN KEYS
+        # CLEAN KEYS (IMPORTANT)
         # ==============================
-        inv["ProductID"] = inv[inv_product].astype(str).str.strip()
-        prod["ProductID"] = prod[prod_id].astype(str).str.strip()
+        def clean_id(x):
+            return str(x).strip().lstrip("0")
+
+        inv["ProductID"] = inv[inv_product].apply(clean_id)
+        prod["ProductID"] = prod[prod_id].apply(clean_id)
 
         prod["Family"] = prod[prod_family].astype(str).str.strip().str.upper()
         front["Family"] = front[front_family].astype(str).str.strip().str.upper()
@@ -98,10 +97,10 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         progress.progress(10)
 
         # ==============================
-        # MAP PRODUCT → FAMILY
+        # MERGE PRODUCT (KEY STEP)
         # ==============================
         merged = inv.merge(
-            prod[["ProductID", "Family"]],
+            prod[["ProductID", "Family", "Type"]],
             on="ProductID",
             how="left"
         )
@@ -205,11 +204,20 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         merged = merged.merge(freq, on=["State", "Family", "Invoice Cost"], how="left")
 
         # ==============================
-        # FINAL OUTPUT
+        # FINAL OUTPUT (Type = Column C)
         # ==============================
         final = merged[[
-            "State","Family","Invoice Cost","Frontline","Tax",
-            "Total Cost","Markup","Markup %","Frequency","Top"
+            "State",
+            "Family",
+            "Type",  # ✅ from Product via ProductID
+            "Invoice Cost",
+            "Frontline",
+            "Tax",
+            "Total Cost",
+            "Markup",
+            "Markup %",
+            "Frequency",
+            "Top"
         ]].drop_duplicates()
 
         # ==============================
