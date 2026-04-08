@@ -33,14 +33,12 @@ st.markdown("### 📊 Markup % Formula")
 st.info(
     """
     **Markup % = (Invoice Cost - (Frontline + Tax)) / (Frontline + Tax)**
-
-    - Invoice Cost → from Invoice file  
-    - Frontline → Active frontline cost  
-    - Tax → State tax  
-    - Total Cost → Frontline + Tax  
     """
 )
 
+# ==============================
+# RUN LOGIC
+# ==============================
 if inv_file and prod_file and front_file and tax_file and store_file:
 
     inv = load_file(inv_file)
@@ -51,30 +49,32 @@ if inv_file and prod_file and front_file and tax_file and store_file:
 
     st.success("Files loaded")
 
-    col1, col2, col3, col4, col5 = st.columns(5)
+    # ==============================
+    # FIXED COLUMN MAPPING
+    # ==============================
 
-    with col1:
-        inv_store = st.selectbox("Invoice Store", inv.columns)
-        inv_product = st.selectbox("Invoice ProductID", inv.columns)
-        inv_cost = st.selectbox("Invoice Cost", inv.columns)
+    # Invoice
+    inv_store = "store"
+    inv_product = "productId"
+    inv_cost = "price"   # change to "total" if needed
 
-    with col2:
-        prod_id = st.selectbox("Products ProductID", prod.columns)
-        prod_family = st.selectbox("Products Family", prod.columns)
+    # Product
+    prod_id = "ProductId"
+    prod_family = "Family"
 
-    with col3:
-        front_family = st.selectbox("Frontline Family", front.columns)
-        front_cost = st.selectbox("Frontline Cost", front.columns)
-        front_start = st.selectbox("Start Date", front.columns)
-        front_end = st.selectbox("End Date", front.columns)
+    # Frontline
+    front_family = "Family"
+    front_cost = "CasePrice"
+    front_start = "Start"
+    front_end = "End"
 
-    with col4:
-        tax_state = st.selectbox("Tax State", tax.columns)
-        tax_value = st.selectbox("Tax Value", tax.columns)
+    # Store
+    store_store = "uniqueId"
+    store_state = "stateAbbrev"
 
-    with col5:
-        store_store = st.selectbox("Storelist Store", store.columns)
-        store_state = st.selectbox("Storelist State", store.columns)
+    # Tax (ONLY selector kept)
+    tax_state = st.selectbox("Tax State", tax.columns)
+    tax_value = st.selectbox("Tax Value", tax.columns)
 
     if st.button("🚀 Run Analysis"):
 
@@ -186,31 +186,6 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         merged["Markup %"] = merged["Markup %"].round(3)
 
         progress.progress(90)
-
-        # ==============================
-        # 🎯 DYNAMIC EXAMPLE
-        # ==============================
-        example = merged.dropna(subset=["Invoice Cost", "Frontline", "Tax"]).head(1)
-
-        if not example.empty:
-            row = example.iloc[0]
-
-            st.markdown("### 🔍 Live Example Calculation")
-
-            st.success(
-                f"""
-                Invoice Cost = {row['Invoice Cost']:.2f}  
-                Frontline = {row['Frontline']:.2f}  
-                Tax = {row['Tax']:.2f}  
-
-                Total Cost = {row['Total Cost']:.2f}  
-
-                Markup = {row['Markup']:.2f}  
-
-                Markup % = ({row['Invoice Cost']:.2f} - ({row['Frontline']:.2f} + {row['Tax']:.2f})) / {row['Total Cost']:.2f}  
-                = {row['Markup %']:.3f}
-                """
-            )
 
         # ==============================
         # FREQUENCY
