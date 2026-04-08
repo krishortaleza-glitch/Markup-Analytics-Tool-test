@@ -23,7 +23,7 @@ tax_file = st.file_uploader("Taxes")
 store_file = st.file_uploader("Storelist")
 
 st.markdown("### 📊 Markup % Formula")
-st.info("Markup % = (Invoice Cost - (Frontline + Tax)) / (Frontline + Tax)")
+st.info("Markup % = (Invoice Cost - Total Cost) / Total Cost")
 
 if inv_file and prod_file and front_file and tax_file and store_file:
 
@@ -55,8 +55,11 @@ if inv_file and prod_file and front_file and tax_file and store_file:
     store_store = "uniqueId"
     store_state = "stateAbbrev"
 
+    # TAX selectors
     tax_state = st.selectbox("Tax State", tax.columns)
-    tax_value = st.selectbox("Tax Value", tax.columns)
+    tax_percentage_col = st.selectbox("Percentage", tax.columns)
+    tax_value = st.selectbox("Tax", tax.columns)
+    uom_tax_col = st.selectbox("Products/Case * Tax", tax.columns)
 
     if st.button("🚀 Run Analysis"):
 
@@ -85,11 +88,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         # ==============================
         # PRODUCT DEDUP
         # ==============================
-        prod = (
-            prod
-            .sort_values(prod_case, ascending=False)
-            .drop_duplicates(subset=["ProductID"], keep="first")
-        )
+        prod = prod.drop_duplicates(subset=["ProductID"])
 
         # ==============================
         # MERGE PRODUCT
@@ -150,7 +149,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         # TAX MERGE
         # ==============================
         merged = merged.merge(
-            tax[["State", tax_value]],
+            tax,
             on="State",
             how="left"
         )
@@ -158,49 +157,37 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         progress.progress(85)
 
         # ==============================
-        # TAX RULE ENGINE
+        # TAX ENGINE (FINAL LOGIC)
         # ==============================
-        merged["Base Tax"] = pd.to_numeric(merged[tax_value], errors="coerce")
+        merged["Percentage"] = pd.to_numeric(merged[tax_percentage_col], errors="coerce")
+        merged["TaxValue"] = pd.to_numeric(merged[tax_value], errors="coerce")
+        merged["Products/Case * Tax"] = pd.to_numeric(merged[uom_tax_col], errors="coerce")
+
         merged["Frontline"] = pd.to_numeric(merged[front_cost], errors="coerce")
-        merged[prod_case] = pd.to_numeric(merged[prod_case], errors="coerce")
+        merged["Products/Case"] = pd.to_numeric(merged["Products/Case"], errors="coerce")
 
-        merged["Tax"] = merged["Base Tax"]
-        merged["Tax Rule Applied"] = "Default"
+        merged["Tax"] = 0
+        merged["Tax Rule Applied"] = "None"
 
-        merged["Type"] = merged["Type"].astype(str).str.strip()
-        merged["State"] = merged["State"].astype(str).str.strip().str.upper()
+        # 1️⃣ Percentage
+        mask_pct = merged["Percentage"].notna()
+        merged.loc[mask_pct, "Tax"] = merged["Frontline"] * merged["Percentage"]
+        merged.loc[mask_pct, "Tax Rule Applied"] = "Percentage"
 
-        # TX
-        mask_tx = (
-            merged["Type"].isin(["Modern Oral", "Smokeless", "Smokeless Big", "Snus"]) &
-            (merged["State"] == "TX")
+        # 2️⃣ Tax column
+        mask_tax = merged["TaxValue"].notna() & (~mask_pct)
+        merged.loc[mask_tax, "Tax"] = merged["TaxValue"]
+        merged.loc[mask_tax, "Tax Rule Applied"] = "Tax Value"
+
+        # 3️⃣ Products/Case * Tax (rate * case)
+        mask_case = (
+            merged["Products/Case * Tax"].notna()
+        ) & (~mask_pct) & (~mask_tax)
+
+        merged.loc[mask_case, "Tax"] = (
+            merged["Products/Case"] * merged["Products/Case * Tax"]
         )
-        merged.loc[mask_tx, "Tax"] = merged[prod_case] * merged["Base Tax"]
-        merged.loc[mask_tx, "Tax Rule Applied"] = "TX: Case * Tax"
-
-        # CO Smokeless Big
-        mask_co_big = (
-            (merged["Type"] == "Smokeless Big") &
-            (merged["State"] == "CO")
-        )
-        merged.loc[mask_co_big, "Tax"] = merged[prod_case] * merged["Base Tax"]
-        merged.loc[mask_co_big, "Tax Rule Applied"] = "CO Big: Case * Tax"
-
-        # KS, NM
-        mask_ks_nm = (
-            merged["Type"].isin(["Modern Oral", "Smokeless", "Smokeless Big", "Snus"]) &
-            merged["State"].isin(["KS", "NM"])
-        )
-        merged.loc[mask_ks_nm, "Tax"] = (merged["Base Tax"] / 100) * merged["Frontline"]
-        merged.loc[mask_ks_nm, "Tax Rule Applied"] = "KS/NM: % * Frontline"
-
-        # CO %
-        mask_co_pct = (
-            merged["Type"].isin(["Modern Oral", "Smokeless", "Snus"]) &
-            (merged["State"] == "CO")
-        )
-        merged.loc[mask_co_pct, "Tax"] = (merged["Base Tax"] / 100) * merged["Frontline"]
-        merged.loc[mask_co_pct, "Tax Rule Applied"] = "CO: % * Frontline"
+        merged.loc[mask_case, "Tax Rule Applied"] = "Case * Rate"
 
         merged["Tax"] = merged["Tax"].fillna(0)
 
@@ -215,14 +202,10 @@ if inv_file and prod_file and front_file and tax_file and store_file:
 
         merged["Markup %"] = merged["Markup %"].replace([float("inf"), -float("inf")], 0)
 
-        merged["Total Cost"] = merged["Total Cost"].round(2)
-        merged["Markup"] = merged["Markup"].round(2)
-        merged["Markup %"] = merged["Markup %"].round(3)
-
         progress.progress(90)
 
         # ==============================
-        # FREQUENCY (BEFORE DEDUP ✅)
+        # FREQUENCY (BEFORE DEDUP)
         # ==============================
         freq = (
             merged
@@ -239,7 +222,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         merged = merged.merge(freq, on=["State", "Family", "Type", "Invoice Cost"], how="left")
 
         # ==============================
-        # 🔥 DEDUP AFTER FREQUENCY
+        # DEDUP
         # ==============================
         merged = merged.sort_values("Tax", ascending=False)
 
@@ -254,7 +237,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         final = merged[[
             "State","Family","Type","Invoice Cost","Frontline","Tax",
             "Total Cost","Markup","Markup %","Frequency","Top","Tax Rule Applied"
-        ]].drop_duplicates()
+        ]]
 
         # ==============================
         # EXPORT
@@ -267,25 +250,8 @@ if inv_file and prod_file and front_file and tax_file and store_file:
 
         output.seek(0)
 
-        wb = load_workbook(output)
-        ws = wb["Analysis"]
-
-        green = PatternFill(start_color="C6EFCE", fill_type="solid")
-        top_col = list(final.columns).index("Top") + 1
-
-        for row_idx in range(2, ws.max_row + 1):
-            if ws.cell(row=row_idx, column=top_col).value:
-                for col_idx in range(1, ws.max_column + 1):
-                    ws.cell(row=row_idx, column=col_idx).fill = green
-
-        final_output = BytesIO()
-        wb.save(final_output)
-        final_output.seek(0)
-
-        progress.progress(100)
-
         st.download_button(
             "📥 Download Analysis",
-            data=final_output,
+            data=output,
             file_name=f"markup_analysis_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
         )
