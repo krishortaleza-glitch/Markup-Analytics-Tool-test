@@ -55,6 +55,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
 
     # TAX SELECTORS
     tax_state = st.selectbox("Tax State", tax.columns)
+    tax_type_col = st.selectbox("Tax Product Type", tax.columns)
     tax_percentage_col = st.selectbox("Percentage", tax.columns)
     tax_value = st.selectbox("Tax", tax.columns)
     uom_tax_col = st.selectbox("Products/Case * Tax", tax.columns)
@@ -64,10 +65,13 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         progress = st.progress(0)
 
         # ==============================
-        # CLEAN NUMERIC FUNCTION
+        # HELPERS
         # ==============================
         def clean_numeric(series):
             return pd.to_numeric(series.astype(str).str.strip(), errors="coerce")
+
+        def clean_text(series):
+            return series.astype(str).str.strip().str.upper()
 
         def clean_id(x):
             return str(x).strip().lstrip("0")
@@ -84,8 +88,8 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         store["State"] = store[store_state].astype(str).str.strip()
         tax["State"] = tax[tax_state].astype(str).str.strip()
 
-        prod["Family"] = prod[prod_family].astype(str).str.strip().str.upper()
-        front["Family"] = front[front_family].astype(str).str.strip().str.upper()
+        prod["Family"] = clean_text(prod[prod_family])
+        front["Family"] = clean_text(front[front_family])
 
         progress.progress(10)
 
@@ -104,6 +108,12 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         )
 
         progress.progress(25)
+
+        # ==============================
+        # NORMALIZE TYPE (CRITICAL)
+        # ==============================
+        merged["Type"] = clean_text(merged["Type"])
+        tax["ProductType"] = clean_text(tax[tax_type_col])
 
         # ==============================
         # ACTIVE FRONTLINE
@@ -150,14 +160,19 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         progress.progress(75)
 
         # ==============================
-        # TAX MERGE
+        # 🔥 TAX MERGE (STATE + TYPE)
         # ==============================
-        merged = merged.merge(tax, on="State", how="left")
+        merged = merged.merge(
+            tax,
+            left_on=["State", "Type"],
+            right_on=["State", "ProductType"],
+            how="left"
+        )
 
         progress.progress(85)
 
         # ==============================
-        # CLEAN NUMERIC FIELDS (FIXED)
+        # CLEAN NUMERIC
         # ==============================
         merged["Percentage"] = clean_numeric(merged[tax_percentage_col])
         merged["TaxValue"] = clean_numeric(merged[tax_value])
@@ -166,7 +181,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         merged["Products/Case"] = clean_numeric(merged["Products/Case"])
 
         # ==============================
-        # TAX ENGINE (FINAL LOGIC)
+        # TAX ENGINE
         # ==============================
         merged["Tax"] = 0.0
         merged["Tax Rule Applied"] = "None"
@@ -181,7 +196,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         merged.loc[mask_tax, "Tax"] = merged["TaxValue"]
         merged.loc[mask_tax, "Tax Rule Applied"] = "Tax Value"
 
-        # 3️⃣ Products/Case * Tax (rate * case)
+        # 3️⃣ Case rate
         mask_case = (
             merged["Products/Case * Tax"].notna()
         ) & (~mask_pct) & (~mask_tax)
@@ -207,7 +222,7 @@ if inv_file and prod_file and front_file and tax_file and store_file:
         progress.progress(90)
 
         # ==============================
-        # FREQUENCY (BEFORE DEDUP)
+        # FREQUENCY
         # ==============================
         freq = (
             merged
